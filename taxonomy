@@ -1,0 +1,469 @@
+library("stringr")
+library("gdata")
+library(plyr)
+library(tm)
+library(SnowballC)
+library(stringdist)
+library(RecordLinkage)
+library(stringi)
+library(xlsx)
+
+getwd()
+setwd("C:/Users/JORDAN01/Google Drive/cbs")
+
+
+taxonomy <- read.csv("cbs-taxonomie-hierarchische-lijst.txt", row.names=NULL, header = FALSE)
+taxonomy <- taxonomy[-(1:7),]
+
+taxonomy$V1 <- as.character(taxonomy$V1)
+taxonomy$V2 <- as.character(taxonomy$V2)
+cols <- c("V1", "V2")
+
+taxonomy$tags <- apply( taxonomy[ , cols ] , 1 , paste, collapse = " " )
+taxonomy$V1 <- NULL
+taxonomy$V2 <- NULL
+names(taxonomy) <- c("tags")
+
+#taxonomy$tags <- gsub("Ã¯","ï", taxonomy$tags)
+#taxonomy$tags <- gsub("Ã«", "ee", taxonomy$tags)
+#taxonomy$tags <- gsub("ã«","ë", taxonomy$tags)
+#taxonomy$tags <- tolower(taxonomy$tags)
+#taxonomy$tags <- trimws(taxonomy$tags)
+taxonomy1 <- taxonomy
+#taxonomy1$tags <- tolower(taxonomy1$tags)
+taxonomy1$tags <- gsub(".	 .	 .	 .	 .	 .", "", taxonomy$tags)
+taxonomy1$tags <- gsub(".	 .	 .	 .	 .	", "", taxonomy$tags)
+taxonomy1$tags <- gsub(".	 .	 .	 .	", "", taxonomy$tags)
+taxonomy1$tags <- gsub(".	 .	 .	", "", taxonomy$tags)
+taxonomy1$tags <- gsub(".	 .	", "", taxonomy$tags)
+taxonomy1$tags <- gsub(".	", "",taxonomy$tags)
+taxonomy1$tags <- trimws(taxonomy1$tags)
+
+
+
+
+inputFile <- "taxonomy_new.txt"
+con  <- file(inputFile, open = "r")
+
+#skip first 8 header rows
+skipped <- readLines(con, n = 8, warn = FALSE)
+
+dataList <- c()
+# skip first 9 rows
+while (length(oneLine <- readLines(con, n = 1, warn = FALSE)) > 0) {
+  # is this a topic line? (no leading tab)
+  if (substr(oneLine, 1, 1) != "\t") {
+    #the topic line
+    topic <- oneLine
+  } else if (substr(oneLine, 1, 5) == "\tUF: ") {
+    # the UF line
+    dataList <- c(dataList, paste(topic, substring(oneLine, 6), sep = ","))
+  } else if (substr(oneLine, 1, 10) == "\tGEBRUIK: ") {
+    # the UF line
+    dataList <- c(dataList, paste(topic, substring(oneLine, 11), sep = ","))
+  }    
+} 
+
+close(con)
+
+dataList <- as.data.frame(dataList)
+
+names(dataList) <- c("tags")
+
+dataList$tags <- gsub('\\:.*', '', dataList$tags)
+dataList$tags <- gsub("gewijzigd","", dataList$tags)
+dataList$tags <- gsub("^$", "N", dataList$tags)
+dataList <- dataList[which(dataList$tags != "N"),]
+dataList <- as.data.frame(dataList)
+names(dataList) <- c("tags")
+dataList$tags <- as.character(dataList$tags)
+
+#dataList <- as.data.frame(dataList[which(dataList$tags != "wo"|dataList$tags != "so" | dataList$tags != "co2" |
+#                             dataList$tags != "nv"|dataList$tags != "ov"|
+#                            dataList$tags != "ho" | dataList$tags != "tv"),])
+#dataList$tags <- gsub(",", " ",dataList$tags)
+
+#drops <- c("wo","so","ho","nv","ov","tv","co2")
+
+
+
+#dataList1$tags <- as.character(dataList1$tags)
+
+tags <- strsplit(as.character(dataList$tags), ",", fixed = TRUE)
+tags <- unlist(tags)
+tags <- as.data.frame(tags)
+
+keywords$labels <- gsub("wo|so|ho|nv|ov|tv|co2", "N", keywords$labels)
+keywords <- keywords[which(keywords$labels != N),]
+
+tags1 <- as.data.frame(sapply(tags, function(x) 
+  gsub(paste(drops, collapse = "|"), "", x)))
+
+head(tags)
+
+inputData <- readRDS("data.RDS")
+
+inputData1 <- inputData[,c(1,2,3,4,9)]
+
+inputData1$body <- gsub("^$", "N", inputData1$body)
+inputData3 <- inputData1[which(inputData1$body != "N"),]
+
+#inputData1$keywords <- str_extract_all(inputData$title, paste(alfa2$tags, collapse = "|"))
+
+a <- intersect(inputData1$title, alfa2$tags)
+title <- inputData1$title
+tags <- alfa2$tags
+
+y <- strsplit(as.character(inputData1$title), " ", fixed = TRUE)
+title <- data.frame(col1= unlist(y), 
+                    col2= rep(inputData1$identifier, sapply(y, length)),
+                    col3= rep(inputData1$title, sapply(y, length))
+)
+
+#t <- strsplit(as.character(alfa2$tags), " ", fixed = TRUE)
+#t <- data.frame(col1= unlist(t), 
+#                col2= rep(alfa2$tags, sapply(t, length)))
+
+kwords_title <- as.data.frame(title[which(title$col1 %in% uniq$tags),])
+names(kwords_title) <- c("labels", "identifier","title")
+
+kwords_title_new <- aggregate(labels ~ identifier + title, kwords_title, paste)
+kwords_title_new <- data.frame(lapply(kwords_title_new, as.character), stringsAsFactors=FALSE)
+write.csv(kwords_title_new, "kwords_title_new.csv", row.names = FALSE)
+
+
+kwords_title_1 <- as.data.frame(kwords_title[which(kwords_title$labels %in% keywords$labels),])
+
+
+
+
+#a <- cbind(kwords_title_1, keywords)
+
+kwords_title_2 <- join(listtt, kwords_title_1, type = "left")
+
+kwords_title_2 <- kwords_title_2[complete.cases(kwords_title_2),]
+
+kwords_title_2$topics <- as.character(kwords_title_2$topics)
+kwords_title_2$labels <- as.character(kwords_title_2$labels)
+kwords_title_2$title <- as.character(kwords_title_2$title)
+kwords_title_2$identifier <- as.character(kwords_title_2$identifier)
+
+kwords_title_l <- aggregate(labels ~ identifier + title, kwords_title_2, unique, collapse = ",")
+kwords_title_t <- aggregate(topics ~ identifier + title, kwords_title_2, unique, collapse = ",")
+
+kwords_title_all <- join(kwords_title_l, kwords_title_t, type = "left")
+kwords_title_all <- data.frame(lapply(kwords_title_all, as.character), stringsAsFactors=FALSE)
+write.csv(kwords_title_all, "keywords_title.csv", row.names = FALSE)
+
+
+kwords_a <- as.data.frame(title[which(title$col1 %in% alfa2$tags),])
+names(kwords_a) <- c("keywords", "identifier","title")
+#kwords_a <- data.frame(lapply(kwords_a, as.character), stringsAsFactors=FALSE)
+kwords_aa <- aggregate(keywords ~ identifier + title, kwords_a, paste)
+#kwords_aa$title <- gsub("\''", "", kwords_aa$title)
+kwords_aa <- data.frame(lapply(kwords_aa, as.character), stringsAsFactors=FALSE)
+
+write.csv(kwords_aa, "new_keywords_title_one.csv", row.names = FALSE)
+
+kwords_l <- as.data.frame(title[which(title$col1 %in% taxonomy1$tags),])
+kwords_t <- as.data.frame(title[which(title$col1 %in% keywords$topics),])
+
+names(kwords_l) <- c("labels", "identifier","title")
+names(kwords_t) <- c("topics", "identifier", "title")
+
+kwords_ll <- aggregate(labels ~ identifier + title , kwords_l, paste)
+#kwords_ll <- data.frame(lapply(kwords_ll, as.character), stringsAsFactors=FALSE)
+#write.csv(kwords_ll, "new_keywords_title.csv", row.names = FALSE)
+
+
+kwords_tt <- aggregate(topics ~ identifier + title, kwords_t, paste)
+kwords <- merge(kwords_l, kwords_t, by = "identifier")
+kwords$title.x <- NULL
+
+kwords <- join(kwords_ll, kwords_tt, type = "left")
+kwords <- data.frame(lapply(kwords, as.character), stringsAsFactors=FALSE)
+write.csv(kwords, "kwords_title.csv", row.names = FALSE)
+
+kwords_k <- aggregate(labels ~ identifier + topics + title.y , kwords, paste)
+
+kwords1 <- aggregate(col1 ~ col2 +col3, kwords, paste) 
+
+kwords1 <- as.data.frame(kwords1)
+
+
+x <- strsplit(as.character(inputData1$lead), " ", fixed = TRUE)
+lead <- data.frame(col1= unlist(x), 
+                    col2= rep(inputData1$identifier, sapply(x, length)),
+                    col3= rep(inputData1$lead, sapply(x, length))
+)
+
+kwords_lead <- as.data.frame(title[which(lead$col1 %in% taxonomy1$tags),])
+names(kwords_lead) <- c("labels", "identifier","lead")
+kwords_lead_1 <- as.data.frame(kwords_lead[which(kwords_lead$labels %in% keywords$labels),])
+
+
+kwords_lead_2 <- join(listtt, kwords_lead_1, type = "left")
+
+kwords_lead_2 <- kwords_lead_2[complete.cases(kwords_lead_2),]
+
+kwords_lead_2$topics <- as.character(kwords_lead_2$topics)
+kwords_lead_2$labels <- as.character(kwords_lead_2$labels)
+kwords_lead_2$lead <- as.character(kwords_lead_2$lead)
+kwords_lead_2$identifier <- as.character(kwords_lead_2$identifier)
+
+kwords_lead_l <- aggregate(labels ~ identifier + lead, kwords_lead_2, unique, collapse = ",")
+kwords_lead_t <- aggregate(topics ~ identifier + lead, kwords_lead_2, unique, collapse = ",")
+
+kwords_lead_all <- join(kwords_lead_l, kwords_lead_t, type = "left")
+kwords_lead_all <- data.frame(lapply(kwords_lead_all, as.character), stringsAsFactors=FALSE)
+write.csv(kwords_lead_all, "keywords_lead.csv", row.names = FALSE)
+
+
+
+z <- strsplit(as.character(inputData1$description), " ", fixed = TRUE)
+description <- data.frame(col1= unlist(z), 
+                   col2= rep(inputData1$identifier, sapply(z, length)),
+                   col3= rep(inputData1$description, sapply(z, length))
+)
+
+kwords_description <- as.data.frame(description[which(description$col1 %in% taxonomy1$tags),])
+names(kwords_description) <- c("labels", "identifier","description")
+kwords_description_1 <- as.data.frame(kwords_description[which(kwords_description$labels %in% keywords$labels),])
+
+
+kwords_description_2 <- join(listtt, kwords_description_1, type = "left")
+
+kwords_description_2 <- kwords_description_2[complete.cases(kwords_description_2),]
+
+kwords_description_2$topics <- as.character(kwords_description_2$topics)
+kwords_description_2$labels <- as.character(kwords_description_2$labels)
+kwords_description_2$description <- as.character(kwords_description_2$description)
+kwords_description_2$identifier <- as.character(kwords_description_2$identifier)
+
+kwords_description_l <- aggregate(labels ~ identifier + description, kwords_description_2, unique, collapse = ",")
+kwords_description_t <- aggregate(topics ~ identifier + description, kwords_description_2, unique, collapse = ",")
+
+kwords_description_all <- join(kwords_description_l, kwords_description_t, type = "left")
+kwords_description_all <- data.frame(lapply(kwords_description_all, as.character), stringsAsFactors=FALSE)
+write.csv(kwords_description_all, "keywords_description.csv", row.names = FALSE)
+
+
+
+
+q <- strsplit(as.character(inputData3$body), " ", fixed = TRUE)
+body <- data.frame(col1= unlist(q), 
+                          col2= rep(inputData3$identifier, sapply(q, length)),
+                          col3= rep(inputData3$body, sapply(q, length))
+)
+
+kwords_body <- as.data.frame(body[which(body$col1 %in% taxonomy1$tags),])
+names(kwords_body) <- c("labels", "identifier","body")
+kwords_body_1 <- as.data.frame(kwords_body[which(kwords_body$labels %in% keywords$labels),])
+
+
+kwords_body_2 <- join(listtt, kwords_body_1, type = "left")
+
+kwords_body_2 <- kwords_body_2[complete.cases(kwords_body_2),]
+
+kwords_body_2$topics <- as.character(kwords_body_2$topics)
+kwords_body_2$labels <- as.character(kwords_body_2$labels)
+kwords_body_2$body <- as.character(kwords_body_2$body)
+kwords_body_2$identifier <- as.character(kwords_body_2$identifier)
+
+kwords_body_l <- aggregate(labels ~ identifier + body, kwords_body_2, unique, collapse = ",")
+kwords_body_t <- aggregate(topics ~ identifier + body, kwords_body_2, unique, collapse = ",")
+
+kwords_body_all <- join(kwords_body_l, kwords_body_t, type = "left")
+kwords_body_all <- data.frame(lapply(kwords_body_all, as.character), stringsAsFactors=FALSE)
+write.csv(kwords_body_all, "keywords_body.txt", row.names = FALSE, sep = ",")
+write.xlsx(kwords_body_all, "kwords_body_all.xls", row.names = FALSE)
+
+saveRDS(kwords_body_all, "kwords_body.RDS")
+
+
+
+
+
+kwords_aa <- data.frame(lapply(kwords_aa, as.character), stringsAsFactors=FALSE)
+
+
+
+
+
+
+                    
+proba <- inputData1[which(inputData1$keywords != "character(0)"),]
+
+proba1 <- proba[,c(1,5,6)]
+
+y <- strsplit(as.character(proba$keywords), ",", fixed = TRUE)
+
+proba2 <- data.frame(col1= unlist(y), 
+                     col2= rep(proba1$title, sapply(y, length)),
+                     col3= rep(proba1$identifier, sapply(y, length))
+)
+
+names(proba2) <- c("keywords","title", "identifier")
+
+proba2$keywords <- gsub("\\c\\("," \\",proba2$keywords)
+proba2$keywords <- gsub("\\(|\\)", "", proba2$keywords)
+proba2$keywords <-  gsub("\"", "", proba2$keywords)
+proba2$keywords <- trimws(proba2$keywords)
+
+proba2$keywords <- as.character(proba2$keywords)
+proba2$title <- as.character(proba2$title)
+
+proba2$sim <- levenshteinSim(proba2$keywords, proba2$title)
+proba2$str <- str_sub(proba2$keywords, proba2$title)
+
+proba3 <- proba2[which(proba2$sim > 0.1),]
+proba4 <- proba2[which(proba2$sim < 0.1),]
+
+#######################################################################
+#######################################################################
+
+
+inputFile <- "taxonomy_new.txt"
+con  <- file(inputFile, open = "r")
+
+#skip first 8 header rows
+skipped <- readLines(con, n = 8, warn = FALSE)
+
+labels <- c()
+topics <- c()
+# skip first 9 rows
+while (length(oneLine <- readLines(con, n = 1, warn = FALSE)) > 0) {
+  # is this a topic line? (no leading tab)
+  if (oneLine != "" && substr(oneLine, 1, 1) != "\t")  {
+    #the topic line
+    topic <- oneLine
+    labels <- c(labels, topic)
+    topics <- c(topics, topic)
+  } else if (substr(oneLine, 1, 5) == "\tUF: ") {
+    # the UF line
+    label <- substring(oneLine, 6)
+    labels <- c(labels, label)
+    topics <- c(topics, topic)
+  } else if (substr(oneLine, 1, 10) == "\tGEBRUIK: ") {
+    # the UF line
+    label <- substring(oneLine, 11)
+    labels <- c(labels, label)
+    topics <- c(topics, topic)
+  }    
+} 
+
+close(con)
+
+keywords <- data.frame(topics, labels)
+
+
+keywords$topics <- gsub('\\:.*', '', keywords$topics)
+keywords$topics <- gsub("gewijzigd","", keywords$topics)
+keywords$topics <- gsub("^$", "N", keywords$topics)
+keywords <- keywords[which(keywords$topics != "N"),]
+keywords <- as.data.frame(keywords)
+keywords$labels <- as.character(keywords$labels)
+keywords1 <- keywords[1:100,]
+
+key <- c("text 1", "text 2", "text 3", "text 4")
+txt <- c("Vo Den Haag ima mnogu hoogbejaarden", "Vo Den haag ima sladoled",  "Nema nisto", "Vo Den Bosch ima kolaci")
+input <- data.frame(key, txt)
+
+
+findKeywords <- function(text) {
+  paste(unique(keywords1$topics[sapply(keywords1$labels, grepl, text, ignore.case = TRUE)]), sep=",")
+}
+
+keywords1
+
+inputData1$keytopics <- lapply(inputData1$title, findKeywords)
+
+proba <- inputData1[which(inputData1$keytopics != "character(0)"),]
+proba1 <- proba[,c(1,5)]
+proba1 <- data.frame(lapply(proba1, as.character), stringsAsFactors=FALSE)
+write.csv(proba1, "mal_set_topics_1000.csv", row.names = FALSE)
+
+write.csv(keywords, "keywords.csv", row.names = FALSE)
+
+kkk <- as.data.frame(inputData1[which(inputData1$title %in% alfa2$tags),])
+
+
+
+##############################################################
+#################################################################
+
+inputFile <- "taxonomy_new.txt"
+con  <- file(inputFile, open = "r")
+
+#skip first 8 header rows
+skipped <- readLines(con, n = 8, warn = FALSE)
+
+labels <- c()
+topics <- c()
+# skip first 9 rows
+while (length(oneLine <- readLines(con, n = 1, warn = FALSE)) > 0) {
+  # is this a topic line? (no leading tab)
+  if (oneLine != "" && substr(oneLine, 1, 1) != "\t")  {
+    #the topic line
+    topic <- oneLine
+    labels <- c(labels, topic)
+    topics <- c(topics, topic)
+  
+  } else if (substr(oneLine, 1, 10) == "\tGEBRUIK: ") {
+    # the UF line
+    label <- substring(oneLine, 11)
+    labels <- c(labels, label)
+    topics <- c(topics, topic)
+  }    
+} 
+
+close(con)
+
+keywords <- data.frame(topics, labels)
+
+
+#listt <- as.data.frame(taxonomy1[which(taxonomy1$tags %in% keywords$labels),])
+listt <- as.data.frame(all[which(all$small1 %in% keywords$labels),])
+names(listt) <- c("labels")
+
+listtt <- join(listt,keywords,type = "left")
+listtt <- listtt[c(2,1)]
+
+
+
+
+kwords_lead <- as.data.frame(lead[which(lead$col1 %in% uniq$tags),])
+names(kwords_lead) <- c("labels", "identifier","lead")
+kwords_lead$labels <- as.character(kwords_lead$labels)
+kwords_lead$lead <- as.character(kwords_lead$lead)
+kwords_lead$identifier <- as.character(kwords_lead$identifier)
+
+
+kwords_lead_new <- aggregate(labels ~ identifier + lead, kwords_lead, unique, collapse= ",")
+kwords_lead_new <- data.frame(lapply(kwords_lead_new, as.character), stringsAsFactors=FALSE)
+
+write.csv(kwords_lead_new, "kwords_lead_new.csv", row.names = FALSE)
+
+kwords_description <- as.data.frame(description[which(description$col1 %in% uniq$tags),])
+names(kwords_description) <- c("labels", "identifier","description")
+kwords_description$labels <- as.character(kwords_description$labels)
+kwords_description$description <- as.character(kwords_description$description)
+kwords_description$identifier <- as.character(kwords_description$identifier)
+
+kwords_description_new <- aggregate(labels ~ identifier + description, kwords_description, unique, collapse = ",")
+kwords_description_new <- data.frame(lapply(kwords_description_new, as.character), stringsAsFactors=FALSE)
+
+write.csv(kwords_description_new, "kwords_description_new.csv", row.names = FALSE)
+
+
+
+kwords_body <- as.data.frame(body[(body$col1 %in% uniq$tags),])
+names(kwords_body) <- c("labels", "identifier","body")
+kwords_body$labels <- as.character(kwords_body$labels)
+kwords_body$body <- as.character(kwords_body$body)
+kwords_body$identifier <- as.character(kwords_body$identifier)
+
+kwords_body_new <- aggregate(labels ~ identifier + body, kwords_body, unique, collapse = ",")
+kwords_body_new <- data.frame(lapply(kwords_body_new, as.character), stringsAsFactors=FALSE)
+
+write.xlsx(kwords_body_new, "kwords_body_new.xlsx", row.names = FALSE)
