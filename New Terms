@@ -1,0 +1,371 @@
+library(stringr)
+library(gdata)
+library(plyr)
+library(tm)
+library(SnowballC)
+library(stringdist)
+library(RecordLinkage)
+library(stringi)
+library(lsa)
+library(tibble)
+
+getwd()
+setwd("C:/Users/JORDAN01/Google Drive/cbs")
+
+inputData <- readRDS("data.RDS")
+inputData1 <- inputData[,c(1,2,3,4,7,9)]
+#unique(inputData1$themes)
+inputData1$themes <- as.character(inputData1$themes)
+#inputData1$themes <- gsub("^$", "N", inputData1$themes)
+
+inputData1$themes[inputData1$themes == ''] = 'unknown'
+
+
+
+stopwords <- read.csv("stopwords.txt.txt",row.names=NULL, header = FALSE)
+#stopwords <- stopwords[-(1:14),]
+#stopwords$V2 <- NULL
+names(stopwords) <- c("stopwords")
+stopwords$stopwords <- as.character(stopwords$stopwords)
+
+
+cols <- c( "title" , "description" , "lead" )
+
+
+inputData1$text <- apply( inputData1[ , cols ] , 1 , paste , collapse = " " )
+#inputData2$title <- NULL
+#inputData2$lead <- NULL
+#inputData2$description <- NULL
+#inputData2$body <- NULL
+
+inputData1$text <- as.character(inputData1$text)
+inputData1$text <- tolower(inputData1$text)
+inputData1$text <- gsub('[[:digit:]]+', '', inputData1$text)
+#inputData1$text <- gsub("[^[:alnum:] ]", "", inputData1$text)
+inputData1$text <- gsub("den haag", "den_haag", inputData1$text)
+inputData1$text <- gsub("cbs","" ,inputData1$text)
+#inputData1$text <- gsub(x = inputData1$text, pattern = paste(stopwords$stopwords, collapse = "|"), replacement = "")
+
+#inputData1$text <- gsub("(Â |â-|Ã-|â???|â???'|-|Ã-|â-|=|A|Ã|â~|â???|
+#â,|â???|???T|ã??????|~|T|<|.|???|=|Å|â???|äæ???|â|the)","", inputData1$text) 
+
+#inputData2 <- inputData1[c(1:5000),]
+
+y <- strsplit(as.character(inputData1$themes), ",", fixed = TRUE)
+
+
+themes <- data.frame(col1= unlist(y), 
+                    col2= rep(inputData1$identifier, sapply(y, length)),
+                    col3= rep(inputData1$title, sapply(y, length)),
+                    col4= rep(inputData1$text, sapply(y, length))
+)
+
+names(themes) <- c("themes", "identifier", "title", "text")
+
+#themes$text <- gsub("cijfers", "", themes$text)
+
+themes$themes <- as.character(themes$themes)
+themes$identifier <- as.character(themes$identifier)
+themes$title <- as.character(themes$title)
+themes$text <- as.character(themes$text)
+themes$text <- gsub("[[:punct:]]","", themes$text)
+
+x <- strsplit(as.character(themes$text), " ", fixed = TRUE)
+text <- data.frame(col1= unlist(x), 
+                     col2= rep(themes$identifier, sapply(x, length)),
+                     col3= rep(themes$title, sapply(x, length)),
+                     col4= rep(themes$themes, sapply(x, length))
+)
+
+names(text) <- c("text", "identifier", "title", "themes")
+
+text <- text[!(themes$text %in% stopwords$stopwords),]
+themes <- themes[!(themes$text %in% stopwords_nl),]
+themes <- themes[!(themes$text %in% stopwords_en),]
+corpus  <-Corpus(VectorSource(themes$text))
+#some preprocessing
+#corpus <- tm_map(corpus, tolower)
+corpus <- tm_map(corpus, stripWhitespace)
+#corpus <- tm_map(corpus, removeWords, stopwords("dutch"))
+#corpus <- tm_map(corpus, removeWords, c(stopwords("dutch"),"stopwords$stopwords"))
+#corpus <- tm_map(corpus, removeWords, "stopwords$stopwords")
+#corpus <- tm_map(corpus, removeWords, stopwords("english"))
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+
+#corpus <- tm_map(corpus, stemDocument, language="english")
+#creating term matrix with TF-IDF weighting
+terms <-DocumentTermMatrix(corpus,control = list(weighting = function(x) weightTfIdf(x, normalize = FALSE)))
+
+terms <- removeSparseTerms(terms, 0.99)
+
+
+m <- as.matrix(terms)
+m1 <- as.data.frame(m)
+
+myLSAspace = lsa(terms, dims=dimcalc_share())
+
+myNewMatrix = as.textmatrix(myLSAspace)
+
+myNewMatrix <- t(myNewMatrix)
+
+myNewMatrix1 <- as.matrix(myNewMatrix)
+
+
+title <- as.data.frame(themes$themes)
+
+names(title) <- c("")
+
+
+title1 <- t(title)
+
+t <- as.matrix(title1)
+
+t1 <- as.data.frame(title1)
+
+text_matrix <- rbind(t, myNewMatrix1)
+
+text_matrix1 <- as.data.frame(text_matrix)
+
+
+
+
+
+colnames(text_matrix1) <- as.character(unlist(text_matrix1[1,]))
+text_matrix1 = text_matrix1[-1, ]
+
+id <- c(1:ncol(text_matrix1))
+text_matrix1[,id] <- as.numeric(as.character(unlist(text_matrix1[,id])))
+
+text_matrix2 <- tibble::rownames_to_column(text_matrix1, "WORDS")
+
+
+
+text_matrix2_result <- data.frame(text_matrix2[order(-text_matrix2[,2]),1] )
+colnames(text_matrix2_result) <- colnames(text_matrix2)[2]
+#text_matrix2_result
+
+# add the rest of the jobs
+for(i in 3:ncol(text_matrix2)) {
+  text_matrix2_result[colnames(text_matrix2)[i]] <- text_matrix2[order(-text_matrix2[,i]), 1]  
+}
+#text_matrix2_result
+
+saveRDS(text_matrix2_result, "text_matrix2_result.RDS")
+
+write.csv(text_matrix2_result, "text_matrix2_result.csv", row.names = FALSE)
+
+
+text_matrix2_result <- load("text_matrix2_result.RDS")
+
+small <- text_matrix2_result[1:50,]
+
+write.csv(small, "themes_keywords_nobody.csv", row.names = FALSE)
+
+small <- read.csv("themes_keywords.csv")
+
+id <- c(1:ncol(small))
+small[,id] <- as.character(unlist(small[,id]))
+
+small.list <- split(small, seq(nrow(small)))
+small.list1 <- t(small.list)
+small.list1 <- as.data.frame(small.list1)
+
+names(small.list1) <- c("words")
+
+small.list1 <- unique(small.list1$words)
+
+small.list1 <- as.data.frame(small.list1)
+
+small.unlist <-  unlist(small.list)
+small1 <- as.data.frame(small.unlist)
+small1 <- unique(small1)
+small1$small.unlist <- gsub('[[:digit:]]+', '', small1$small.unlist)
+small1$small.unlist <- gsub("^â€™", "N", small1$small.unlist)
+small1 <- small1[which(small1$small.unlist != "N"),]
+small1 <- as.data.frame(small1)
+small1 <- unique(small1)
+names(small1) <- c("word")
+write.csv(small1, "keywords_themes_nobody.csv", row.names = FALSE)
+
+#small <- read.csv("50_most_important_words.csv")
+
+#small1 <- t(small1)
+#small1 <- as.data.frame(small1)
+
+first <- read.csv("keywords_first_set.csv")
+second <- read.csv("keywords_second_set.csv")
+third <- read.csv("keywords_third_set.csv")
+fourth <- read.csv("keywords_fourth_set.csv")
+all <- rbind(first, second,third, fourth)
+all <- unique(all)
+
+all$small1 <- as.character(all$small1)
+
+alfa <- read.csv("cbs-taxonomie-alfabetische-lijst.txt", row.names = NULL, header = FALSE)
+alfa <- alfa[-(1:7),]
+
+alfa$V1 <- as.character(alfa$V1)
+alfa$V2 <- as.character(alfa$V2)
+koloni <- c("V1", "V2")
+
+alfa$tags <- apply( alfa[ , koloni ] , 1 , paste, collapse = " " )
+alfa$V1 <- NULL
+alfa$V2 <- NULL
+
+alfa$tags <- gsub("GEBRUIK:", "", alfa$tags)
+alfa$tags <- gsub("UF:", "", alfa$tags)
+alfa$tags <- gsub("TT:", "", alfa$tags)
+alfa$tags <- gsub("BT:", "", alfa$tags)
+alfa$tags <- gsub("UF:", "", alfa$tags)
+alfa$tags <- gsub("CBS English:", "", alfa$tags)
+alfa$tags <- gsub("NT:", "", alfa$tags)
+alfa$tags <- gsub("RT:", "", alfa$tags)
+alfa$tags <- gsub('\\:.*', '', alfa$tags)
+alfa$tags <- gsub("gewijzigd:","", alfa$tags)
+alfa$tags <- trimws(alfa$tags)
+alfa <- unique(alfa)
+
+dupl <- as.data.frame(small1[(small1$small1 %in% alfa$tags),])
+names(dupl) <- c("tags")
+dupl <- unique(dupl)
+
+uniq <- as.data.frame(small1[!(small1$small1 %in% alfa$tags),])
+names(uniq) <- c("word")
+#uniq <- as.data.frame(small1[which(!small1$small1 %in% alfa$tags),])
+#names(uniq) <- c("word")
+#uniq$tags <- gsub("^den","den haag", uniq$tags)
+#uniq$tags <- gsub("^haag","den haag", uniq$tags)
+uniq <- unique(uniq)
+uniq <- as.data.frame(uniq)
+uniq$word <- as.character(uniq$word)
+uniq$word <- gsub("^â€™", "N", uniq$word)
+
+uniq<- as.data.frame(uniq[which(uniq$word !="N"),])
+
+names(uniq) <- c("word")
+
+new_terms <- write.csv(uniq, "new_tags_themes.csv", row.names = FALSE)
+
+
+#werk <- uniq[which(uniq$tags == "den"),]
+
+th <- aggregate(data.frame(count = themes$themes), list(value = themes$themes), length)
+themes <- aggregate(data.frame(count = inputData1$themes), list(value = inputData1$themes), length)
+titles_t <- aggregate(data.frame(count = inputData1$title), list(value = inputData1$title), length)
+
+
+#docs <-TermDocumentMatrix(corpus,control = list(weighting = function(x) weightTfIdf(x, normalize = FALSE)))
+#docs <- removeSparseTerms(docs, 0.99)
+#m <- as.matrix(docs)
+#v <- sort(rowSums(m),decreasing=TRUE)
+#d <- data.frame(word = names(v),freq=v)
+
+write.csv(text_matrix2, "primer.csv", row.names = FALSE)
+
+
+
+
+tdm <- TermDocumentMatrix(corpus)
+tdm <- removeSparseTerms(tdm, 0.99)
+mm<- as.matrix(tdm)
+mm1 <- as.data.frame(mm)
+v <- sort(rowSums(mm),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+
+
+names(uniq) <- c("word")
+
+uniq_freq <- join(uniq, d, type = "left")
+
+dtm <- DocumentTermMatrix(corpus)
+
+dtm <- removeSparseTerms(dtm, 0.99)
+dtm1 <- as.matrix(dtm)
+dtm2 <- as.data.frame(dtm1)
+
+counts <- colSums(dtm1 != 0)
+
+counts <- as.data.frame(counts)
+
+
+freqs <- colSums(dtm1)
+freqs <- as.data.frame(freqs)
+freqs1 <- tibble::rownames_to_column(freqs, "word")
+
+counts1 <- tibble::rownames_to_column(counts, "word")
+
+counts1$word <- as.character(counts1$word)
+
+count_freqs <- join(freqs1, counts1, type = "left")
+
+count_freqs_small <- join(small1,count_freqs, type = "left")
+
+count_freqs_small <- count_freqs_small[order(-count_freqs_small$freq),]
+
+uniq_freq_count <- join(uniq_freq, counts1, type = "left")
+
+uniq_freq_count <- uniq_freq_count[order(-uniq_freq_count$freq),]
+
+#uniq_freq_count$ratio <- uniq_freq_count$freq/uniq_freq_count$word
+
+write.csv(uniq_freq_count, "word_freq_count.csv",row.names = FALSE )
+
+
+#cor_1 <- findAssocs(dtm, colnames(dtm)[1:2], 0)
+cor_2 <- cor(as.matrix(dtm))
+cor_2 <- as.data.frame(cor_2)
+cor_3 <- cor_2[(row.names(cor_2 )%in% small1$word)]
+cor_4 <- cor_3[(row.names(cor_3 )%in% small1$word),]
+write.csv(cor_4, "correlation_nobody.csv")
+
+
+corr_2 <- cor(as.matrix(terms))
+corr_2 <- as.data.frame(corr_2)
+corr_3 <- corr_2[(row.names(corr_2 )%in% uniq$word)]
+corr_4 <- corr_3[(row.names(corr_3 )%in% uniq$word),]
+
+#kkk <- cbind(cor_4[,1], corr_4[,1])
+
+
+cor_4 <- tibble::rownames_to_column(cor_4, " ")
+
+
+
+cor_4_result <- data.frame(cor_4[order(-cor_4[,2]),1] )
+colnames(cor_4_result) <- colnames(cor_4)[2]
+#text_matrix2_result
+
+# add the rest of the jobs
+for(i in 3:ncol(cor_4)) {
+  cor_4_result[colnames(cor_4)[i]] <- cor_4[order(-cor_4[,i]), 1]  
+}
+
+
+write.csv(cor_4_result, "correlation_results_nobody.csv", row.names = FALSE)
+
+
+scores <- text_matrix1[(row.names(text_matrix1) %in% uniq$word)]
+
+scores <- as.data.frame(scores)
+
+names(scores) <- as.matrix(scores[1, ])
+scores <- scores[-1, ]
+scores[] <- lapply(scores, function(x) type.convert(as.character(x)))
+
+scores <- unique(scores)
+
+s <- rowSums(scores)
+s <- as.data.frame(s)
+
+s1 <- s[order(-s[1]),]
+s1 <- as.data.frame(s1)
+
+s1 <- tibble::rownames_to_column(s, "word")
+
+s1 <- s1[order(-s1$s),]
+names(s1) <- c("word", "scores")
+
+s1 <- s1[(s1$word %in% uniq$word),]
+
+write.csv(s1, "scores.csv", row.names = FALSE)
